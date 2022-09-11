@@ -10,6 +10,7 @@ trait PatternFinder {
     fn find_next(&self, n: u64) -> u64;
 }
 
+#[derive(Default)]
 struct RoundNumberFinder {}
 
 impl PatternFinder for RoundNumberFinder {
@@ -27,6 +28,7 @@ impl PatternFinder for RoundNumberFinder {
     }
 }
 
+#[derive(Default)]
 struct RepeatedNumberFinder {}
 
 impl RepeatedNumberFinder {
@@ -81,28 +83,43 @@ impl PatternFinder for SequenceFinder {
     }
 }
 
+struct MultiPatternFinder {
+    pattern_finders: Vec<Box<dyn PatternFinder>>,
+}
+
+impl MultiPatternFinder {
+    fn new() -> Self {
+        let pattern_finders: Vec<Box<dyn PatternFinder>> = vec![
+            Box::new(RoundNumberFinder::default()),
+            Box::new(RepeatedNumberFinder::default()),
+            Box::new(SequenceFinder::default()),
+            Box::new(SequenceFinder { reverse: true }),
+        ];
+
+        Self { pattern_finders }
+    }
+
+    fn find_patterns(&self, n: u64) -> Vec<u64> {
+        let mut res: Vec<u64> = self
+            .pattern_finders
+            .iter()
+            .map(|f| f.find_next(n))
+            .filter(|n| *n != 0)
+            .collect();
+
+        res.sort();
+        res
+    }
+}
+
 fn main() {
-    let mut finders = Vec::new();
-
-    let round_num_finder = RoundNumberFinder {};
-    finders.push(&round_num_finder as &dyn PatternFinder);
-
-    let repeat_num_finder = RepeatedNumberFinder {};
-    finders.push(&repeat_num_finder);
-
-    let fw_seq_finder = SequenceFinder::default();
-    finders.push(&fw_seq_finder);
-
-    let bw_seq_finder = SequenceFinder { reverse: true };
-    finders.push(&bw_seq_finder);
+    let f = MultiPatternFinder::new();
 
     let nums = vec![9, 99, 100, 4321, 123456];
 
     for n in nums {
-        for f in &finders {
-            let next = f.find_next(n);
-
-            println!("{n} -> {next}");
+        for p in f.find_patterns(n) {
+            println!("{n} -> {p}");
         }
     }
 }
