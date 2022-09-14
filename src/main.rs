@@ -1,3 +1,6 @@
+use chrono::{naive::NaiveDate, Duration};
+use clap::Parser;
+
 fn digit_count(n: u64) -> u32 {
     (n as f64 + 1.).log(10.).ceil() as u32
 }
@@ -112,7 +115,7 @@ impl MultiPatternFinder {
     }
 }
 
-fn main() {
+fn _test_pattern_finders() {
     let f = MultiPatternFinder::new();
 
     let nums = vec![9, 99, 100, 4321, 123456];
@@ -122,4 +125,108 @@ fn main() {
             println!("{n} -> {p}");
         }
     }
+}
+
+#[derive(Parser, Debug)]
+#[clap(version)]
+struct Args {
+    /// Name of the person to greet
+    #[clap()]
+    date: String,
+}
+
+#[derive(Debug)]
+struct DeltaCandidate {
+    pattern: u64,
+    unit: String,
+    delta_sec: u64,
+}
+
+fn add_best_candidate(
+    n: u64,
+    unit: &str,
+    candidates: &mut Vec<DeltaCandidate>,
+    f: &MultiPatternFinder,
+    delta_mul: u64,
+) {
+    let mut best_pattern: u64 = 0;
+    let mut best_delta = u64::MAX;
+
+    // println!("***********");
+
+    for p in f.find_patterns(n) {
+        let delta = p - n;
+
+        // println!("pattern: {p}, delta: {delta}");
+
+        if delta < best_delta {
+            best_delta = delta;
+            best_pattern = p;
+        }
+    }
+
+    candidates.push(DeltaCandidate {
+        pattern: best_pattern,
+        unit: unit.to_string(),
+        delta_sec: best_delta * delta_mul,
+    });
+}
+
+fn get_duration_str(d: &Duration) -> String {
+    if d.num_weeks() > 20 {
+        let months = d.num_days() * 2 / 70;
+        return format!("{months} months");
+    } else if d.num_days() > 99 {
+        return format!("{} weeks", d.num_weeks());
+    } else if d.num_hours() > 72 {
+        return format!("{} days", d.num_days());
+    } else if d.num_minutes() > 60 {
+        return format!("{} hours", d.num_hours());
+    } else if d.num_seconds() > 60 {
+        return format!("{} minutes", d.num_minutes());
+    } else {
+        return format!("{} seconds", d.num_seconds());
+    }
+}
+
+fn main() {
+    let args = Args::parse();
+
+    let naive_date = NaiveDate::parse_from_str(&args.date, "%Y-%m-%d");
+
+    if let Err(_) = naive_date {
+        println!("Failed to parse date {}", &args.date);
+        return;
+    }
+
+    let naive_date = naive_date.unwrap();
+    let cur_date = chrono::Local::now().date_naive();
+
+    let delta = cur_date - naive_date;
+
+    let mut res: Vec<DeltaCandidate> = Vec::new();
+    let f = MultiPatternFinder::new();
+
+    let seconds = delta.num_seconds().abs() as u64;
+    add_best_candidate(seconds, "seconds", &mut res, &f, 1);
+
+    let minutes = delta.num_minutes().abs() as u64;
+    add_best_candidate(minutes, "minutes", &mut res, &f, 60);
+
+    let hours = delta.num_hours().abs() as u64;
+    add_best_candidate(hours, "hours", &mut res, &f, 60 * 60);
+
+    let days = delta.num_days().abs() as u64;
+    add_best_candidate(days, "days", &mut res, &f, 60 * 60 * 24);
+
+    res.sort_by(|l, r| l.delta_sec.cmp(&r.delta_sec));
+
+    let best = res.first().unwrap();
+    let best_duration = Duration::seconds(best.delta_sec as i64);
+    let best_duration_str = get_duration_str(&best_duration);
+
+    println!(
+        "It'll be {} {} in {}",
+        best.pattern, best.unit, best_duration_str
+    );
 }
