@@ -1,32 +1,52 @@
 use chrono::{naive::NaiveDate, Duration};
 use clap::Parser;
 
-fn digit_count(n: u64) -> u32 {
-    (n as f64 + 1.).log(10.).ceil() as u32
+fn digit_count(n: u64, base: u8) -> u32 {
+    (n as f64 + 1.).log(base as f64).ceil() as u32
 }
 
-fn first_digit(n: u64) -> u8 {
-    (n / (10_u64).pow(digit_count(n) - 1)) as u8
+fn first_digit(n: u64, base: u8) -> u8 {
+    (n / (10_u64).pow(digit_count(n, base) - 1)) as u8
+}
+
+#[derive(Default, Debug)]
+struct Pattern {
+    value: u64,
+    base: u8,
 }
 
 trait PatternFinder {
-    fn find_next(&self, n: u64) -> u64;
+    fn find_next(&self, n: u64) -> Pattern;
 }
 
-#[derive(Default)]
-struct RoundNumberFinder {}
+struct RoundNumberFinder {
+    base: u8,
+}
+
+impl Default for RoundNumberFinder {
+    fn default() -> Self {
+        RoundNumberFinder { base: 10 }
+    }
+}
 
 impl PatternFinder for RoundNumberFinder {
-    fn find_next(&self, n: u64) -> u64 {
+    fn find_next(&self, n: u64) -> Pattern {
         const MAX_EXPONENT: u32 = 19;
 
-        // n - 1, so that powers of 10 are handled OK
-        let digits = digit_count(n - 1);
+        // n - 1, so that powers of base are handled OK
+        let digits = digit_count(n - 1, self.base);
+        let first_digit = first_digit(n, self.base);
 
-        if digits > MAX_EXPONENT {
-            0
+        if digits > MAX_EXPONENT || digits < 2 {
+            Pattern {
+                value: 0,
+                base: self.base,
+            }
         } else {
-            (10_u64).pow(digits)
+            Pattern {
+                value: ((first_digit + 1) as u64) * (self.base as u64).pow(digits - 1),
+                base: self.base,
+            }
         }
     }
 }
@@ -47,16 +67,22 @@ impl RepeatedNumberFinder {
 }
 
 impl PatternFinder for RepeatedNumberFinder {
-    fn find_next(&self, n: u64) -> u64 {
-        let digits = digit_count(n);
-        let first_digit = first_digit(n);
+    fn find_next(&self, n: u64) -> Pattern {
+        let digits = digit_count(n, 10);
+        let first_digit = first_digit(n, 10);
 
         let res = self.get_repeat_number(first_digit, digits);
 
         if res >= n {
-            res
+            Pattern {
+                value: res,
+                base: 10,
+            }
         } else {
-            self.get_repeat_number(first_digit + 1, digits)
+            Pattern {
+                value: self.get_repeat_number(first_digit + 1, digits),
+                base: 10,
+            }
         }
     }
 }
@@ -67,22 +93,25 @@ struct SequenceFinder {
 }
 
 impl PatternFinder for SequenceFinder {
-    fn find_next(&self, n: u64) -> u64 {
+    fn find_next(&self, n: u64) -> Pattern {
         let mut res = 1_u64;
 
         for i in 2..=9 {
             if res >= n {
-                return res;
+                return Pattern {
+                    value: res,
+                    base: 10,
+                };
             }
             if self.reverse {
-                let d = digit_count(res);
+                let d = digit_count(res, 10);
                 res += 10_u64.pow(d) * i;
             } else {
                 res = res * 10 + i;
             }
         }
 
-        0
+        Pattern { value: 0, base: 10 }
     }
 }
 
@@ -94,6 +123,7 @@ impl MultiPatternFinder {
     fn new() -> Self {
         let pattern_finders: Vec<Box<dyn PatternFinder>> = vec![
             Box::new(RoundNumberFinder::default()),
+            Box::new(RoundNumberFinder { base: 16 }),
             Box::new(RepeatedNumberFinder::default()),
             Box::new(SequenceFinder::default()),
             Box::new(SequenceFinder { reverse: true }),
@@ -102,15 +132,15 @@ impl MultiPatternFinder {
         Self { pattern_finders }
     }
 
-    fn find_patterns(&self, n: u64) -> Vec<u64> {
-        let mut res: Vec<u64> = self
+    fn find_patterns(&self, n: u64) -> Vec<Pattern> {
+        let mut res: Vec<Pattern> = self
             .pattern_finders
             .iter()
             .map(|f| f.find_next(n))
-            .filter(|n| *n != 0)
+            .filter(|p| p.value != 0)
             .collect();
 
-        res.sort();
+        res.sort_by(|l, r| l.value.cmp(&r.value));
         res
     }
 }
@@ -122,7 +152,11 @@ fn _test_pattern_finders() {
 
     for n in nums {
         for p in f.find_patterns(n) {
-            println!("{n} -> {p}");
+            if p.base == 10 {
+                println!("{n} -> {}", p.value);
+            } else {
+                println!("{n} -> {:#0x}", p.value);
+            }
         }
     }
 }
@@ -137,7 +171,7 @@ struct Args {
 
 #[derive(Debug)]
 struct DeltaCandidate {
-    pattern: u64,
+    pattern: Pattern,
     unit: String,
     delta_sec: u64,
 }
@@ -149,13 +183,13 @@ fn add_best_candidate(
     f: &MultiPatternFinder,
     delta_mul: u64,
 ) {
-    let mut best_pattern: u64 = 0;
+    let mut best_pattern = Pattern::default();
     let mut best_delta = u64::MAX;
 
     // println!("***********");
 
     for p in f.find_patterns(n) {
-        let delta = p - n;
+        let delta = p.value - n;
 
         // println!("pattern: {p}, delta: {delta}");
 
@@ -174,7 +208,7 @@ fn add_best_candidate(
 
 fn get_duration_str(d: &Duration) -> String {
     if d.num_weeks() > 20 {
-        let months = d.num_days() * 2 / 70;
+        let months = d.num_days() * 2 / 61;
         return format!("{months} months");
     } else if d.num_days() > 99 {
         return format!("{} weeks", d.num_weeks());
@@ -190,6 +224,8 @@ fn get_duration_str(d: &Duration) -> String {
 }
 
 fn main() {
+    // _test_pattern_finders();
+
     let args = Args::parse();
 
     let naive_date = NaiveDate::parse_from_str(&args.date, "%Y-%m-%d");
@@ -219,14 +255,24 @@ fn main() {
     let days = delta.num_days().abs() as u64;
     add_best_candidate(days, "days", &mut res, &f, 60 * 60 * 24);
 
+    let weeks = delta.num_weeks().abs() as u64;
+    add_best_candidate(weeks, "weeks", &mut res, &f, 60 * 60 * 24 * 7);
+
     res.sort_by(|l, r| l.delta_sec.cmp(&r.delta_sec));
 
     let best = res.first().unwrap();
     let best_duration = Duration::seconds(best.delta_sec as i64);
     let best_duration_str = get_duration_str(&best_duration);
 
-    println!(
-        "It'll be {} {} in {}",
-        best.pattern, best.unit, best_duration_str
-    );
+    if best.pattern.base == 10 {
+        println!(
+            "It'll be {} {} in {}",
+            best.pattern.value, best.unit, best_duration_str
+        );
+    } else {
+        println!(
+            "It'll be {:#0x} {} in {}",
+            best.pattern.value, best.unit, best_duration_str
+        );
+    }
 }
