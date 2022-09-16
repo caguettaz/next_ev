@@ -51,15 +51,22 @@ impl PatternFinder for RoundNumberFinder {
     }
 }
 
-#[derive(Default)]
-struct RepeatedNumberFinder {}
+struct RepeatedNumberFinder {
+    base: u8,
+}
+
+impl Default for RepeatedNumberFinder {
+    fn default() -> Self {
+        RepeatedNumberFinder { base: 10 }
+    }
+}
 
 impl RepeatedNumberFinder {
     fn get_repeat_number(&self, first_digit: u8, digits: u32) -> u64 {
         let mut res = first_digit as u64;
 
         for _ in 1..digits {
-            res = res * 10 + first_digit as u64;
+            res = res * (self.base as u64) + first_digit as u64;
         }
 
         res
@@ -68,50 +75,62 @@ impl RepeatedNumberFinder {
 
 impl PatternFinder for RepeatedNumberFinder {
     fn find_next(&self, n: u64) -> Pattern {
-        let digits = digit_count(n, 10);
-        let first_digit = first_digit(n, 10);
+        let digits = digit_count(n, self.base);
+        let first_digit = first_digit(n, self.base);
 
         let res = self.get_repeat_number(first_digit, digits);
 
         if res >= n {
             Pattern {
                 value: res,
-                base: 10,
+                base: self.base,
             }
         } else {
             Pattern {
                 value: self.get_repeat_number(first_digit + 1, digits),
-                base: 10,
+                base: self.base,
             }
         }
     }
 }
 
-#[derive(Default)]
 struct SequenceFinder {
     reverse: bool,
+    base: u8,
+}
+
+impl Default for SequenceFinder {
+    fn default() -> Self {
+        SequenceFinder {
+            reverse: false,
+            base: 10,
+        }
+    }
 }
 
 impl PatternFinder for SequenceFinder {
     fn find_next(&self, n: u64) -> Pattern {
         let mut res = 1_u64;
 
-        for i in 2..=9 {
+        for i in 2..=(self.base as u64 - 1) {
             if res >= n {
                 return Pattern {
                     value: res,
-                    base: 10,
+                    base: self.base,
                 };
             }
             if self.reverse {
-                let d = digit_count(res, 10);
-                res += 10_u64.pow(d) * i;
+                let d = digit_count(res, self.base);
+                res += (self.base as u64).pow(d) * i;
             } else {
-                res = res * 10 + i;
+                res = res * (self.base as u64) + i;
             }
         }
 
-        Pattern { value: 0, base: 10 }
+        Pattern {
+            value: 0,
+            base: self.base,
+        }
     }
 }
 
@@ -125,8 +144,20 @@ impl MultiPatternFinder {
             Box::new(RoundNumberFinder::default()),
             Box::new(RoundNumberFinder { base: 16 }),
             Box::new(RepeatedNumberFinder::default()),
+            Box::new(RepeatedNumberFinder { base: 16 }),
             Box::new(SequenceFinder::default()),
-            Box::new(SequenceFinder { reverse: true }),
+            Box::new(SequenceFinder {
+                reverse: false,
+                base: 16,
+            }),
+            Box::new(SequenceFinder {
+                reverse: true,
+                base: 10,
+            }),
+            Box::new(SequenceFinder {
+                reverse: true,
+                base: 16,
+            }),
         ];
 
         Self { pattern_finders }
@@ -224,7 +255,7 @@ fn get_duration_str(d: &Duration) -> String {
 }
 
 fn main() {
-    // _test_pattern_finders();
+    //_test_pattern_finders();
 
     let args = Args::parse();
 
@@ -263,16 +294,19 @@ fn main() {
     let best = res.first().unwrap();
     let best_duration = Duration::seconds(best.delta_sec as i64);
     let best_duration_str = get_duration_str(&best_duration);
+    let best_date = cur_date + best_duration;
 
-    if best.pattern.base == 10 {
-        println!(
-            "It'll be {} {} in {}",
-            best.pattern.value, best.unit, best_duration_str
-        );
+    let pattern_str = if best.pattern.base == 10 {
+        format!("{}", best.pattern.value)
     } else {
-        println!(
-            "It'll be {:#0x} {} in {}",
-            best.pattern.value, best.unit, best_duration_str
-        );
-    }
+        format!("{:#0x}", best.pattern.value)
+    };
+
+    println!(
+        "It'll be {} {} on {} (in {})",
+        pattern_str,
+        best.unit,
+        best_date.format("%Y-%m-%d"),
+        best_duration_str
+    );
 }
