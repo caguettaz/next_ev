@@ -1,3 +1,5 @@
+use std::fmt::Display;
+
 use chrono::{naive::NaiveDate, Duration};
 use clap::Parser;
 
@@ -15,58 +17,51 @@ struct Pattern {
     base: u8,
 }
 
-trait PatternFinder {
-    fn find_next(&self, n: u64) -> Pattern;
-}
-
-struct RoundNumberFinder {
-    base: u8,
-}
-
-impl Default for RoundNumberFinder {
-    fn default() -> Self {
-        RoundNumberFinder { base: 10 }
+impl Display for Pattern {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self.base {
+            10 => write!(f, "{}", self.value),
+            16 => write!(f, "{:#0x}", self.value),
+            _ => panic!("unhandled base {}", self.base),
+        }
     }
 }
 
+trait PatternFinder {
+    fn find_next(&self, n: u64, base: u8) -> Pattern;
+}
+
+#[derive(Default)]
+struct RoundNumberFinder {}
+
 impl PatternFinder for RoundNumberFinder {
-    fn find_next(&self, n: u64) -> Pattern {
+    fn find_next(&self, n: u64, base: u8) -> Pattern {
         const MAX_EXPONENT: u32 = 19;
 
         // n - 1, so that powers of base are handled OK
-        let digits = digit_count(n - 1, self.base);
-        let first_digit = first_digit(n, self.base);
+        let digits = digit_count(n - 1, base);
+        let first_digit = first_digit(n, base);
 
         if digits > MAX_EXPONENT || digits < 2 {
-            Pattern {
-                value: 0,
-                base: self.base,
-            }
+            Pattern { value: 0, base }
         } else {
             Pattern {
-                value: ((first_digit + 1) as u64) * (self.base as u64).pow(digits - 1),
-                base: self.base,
+                value: ((first_digit + 1) as u64) * (base as u64).pow(digits - 1),
+                base,
             }
         }
     }
 }
 
-struct RepeatedNumberFinder {
-    base: u8,
-}
-
-impl Default for RepeatedNumberFinder {
-    fn default() -> Self {
-        RepeatedNumberFinder { base: 10 }
-    }
-}
+#[derive(Default)]
+struct RepeatedNumberFinder {}
 
 impl RepeatedNumberFinder {
-    fn get_repeat_number(&self, first_digit: u8, digits: u32) -> u64 {
+    fn get_repeat_number(&self, first_digit: u8, digits: u32, base: u8) -> u64 {
         let mut res = first_digit as u64;
 
         for _ in 1..digits {
-            res = res * (self.base as u64) + first_digit as u64;
+            res = res * (base as u64) + first_digit as u64;
         }
 
         res
@@ -74,63 +69,45 @@ impl RepeatedNumberFinder {
 }
 
 impl PatternFinder for RepeatedNumberFinder {
-    fn find_next(&self, n: u64) -> Pattern {
-        let digits = digit_count(n, self.base);
-        let first_digit = first_digit(n, self.base);
+    fn find_next(&self, n: u64, base: u8) -> Pattern {
+        let digits = digit_count(n, base);
+        let first_digit = first_digit(n, base);
 
-        let res = self.get_repeat_number(first_digit, digits);
+        let res = self.get_repeat_number(first_digit, digits, base);
 
         if res >= n {
-            Pattern {
-                value: res,
-                base: self.base,
-            }
+            Pattern { value: res, base }
         } else {
             Pattern {
-                value: self.get_repeat_number(first_digit + 1, digits),
-                base: self.base,
+                value: self.get_repeat_number(first_digit + 1, digits, base),
+                base,
             }
         }
     }
 }
 
+#[derive(Default)]
 struct SequenceFinder {
     reverse: bool,
-    base: u8,
-}
-
-impl Default for SequenceFinder {
-    fn default() -> Self {
-        SequenceFinder {
-            reverse: false,
-            base: 10,
-        }
-    }
 }
 
 impl PatternFinder for SequenceFinder {
-    fn find_next(&self, n: u64) -> Pattern {
+    fn find_next(&self, n: u64, base: u8) -> Pattern {
         let mut res = 1_u64;
 
-        for i in 2..=(self.base as u64 - 1) {
+        for i in 2..=(base as u64 - 1) {
             if res >= n {
-                return Pattern {
-                    value: res,
-                    base: self.base,
-                };
+                return Pattern { value: res, base };
             }
             if self.reverse {
-                let d = digit_count(res, self.base);
-                res += (self.base as u64).pow(d) * i;
+                let d = digit_count(res, base);
+                res += (base as u64).pow(d) * i;
             } else {
-                res = res * (self.base as u64) + i;
+                res = res * (base as u64) + i;
             }
         }
 
-        Pattern {
-            value: 0,
-            base: self.base,
-        }
+        Pattern { value: 0, base }
     }
 }
 
@@ -142,32 +119,20 @@ impl MultiPatternFinder {
     fn new() -> Self {
         let pattern_finders: Vec<Box<dyn PatternFinder>> = vec![
             Box::new(RoundNumberFinder::default()),
-            Box::new(RoundNumberFinder { base: 16 }),
             Box::new(RepeatedNumberFinder::default()),
-            Box::new(RepeatedNumberFinder { base: 16 }),
             Box::new(SequenceFinder::default()),
-            Box::new(SequenceFinder {
-                reverse: false,
-                base: 16,
-            }),
-            Box::new(SequenceFinder {
-                reverse: true,
-                base: 10,
-            }),
-            Box::new(SequenceFinder {
-                reverse: true,
-                base: 16,
-            }),
+            Box::new(SequenceFinder::default()),
+            Box::new(SequenceFinder { reverse: true }),
         ];
 
         Self { pattern_finders }
     }
 
-    fn find_patterns(&self, n: u64) -> Vec<Pattern> {
+    fn find_patterns(&self, n: u64, base: u8) -> Vec<Pattern> {
         let mut res: Vec<Pattern> = self
             .pattern_finders
             .iter()
-            .map(|f| f.find_next(n))
+            .map(|f| f.find_next(n, base))
             .filter(|p| p.value != 0)
             .collect();
 
@@ -176,17 +141,38 @@ impl MultiPatternFinder {
     }
 }
 
+impl PatternFinder for MultiPatternFinder {
+    fn find_next(&self, n: u64, base: u8) -> Pattern {
+        let mut best_pattern = Pattern::default();
+        let mut best_delta = u64::MAX;
+
+        // println!("***********");
+
+        for p in self.find_patterns(n, base) {
+            let delta = p.value - n;
+
+            // println!("pattern: {p}, delta: {delta}");
+
+            if delta < best_delta {
+                best_delta = delta;
+                best_pattern = p;
+            }
+        }
+
+        best_pattern
+    }
+}
+
 fn _test_pattern_finders() {
     let f = MultiPatternFinder::new();
 
     let nums = vec![9, 99, 100, 4321, 123456];
+    let bases = vec![10, 0x10];
 
     for n in nums {
-        for p in f.find_patterns(n) {
-            if p.base == 10 {
-                println!("{n} -> {}", p.value);
-            } else {
-                println!("{n} -> {:#0x}", p.value);
+        for b in bases {
+            for p in f.find_patterns(n, b) {
+                println!("{n} -> {}", p);
             }
         }
     }
@@ -201,40 +187,37 @@ struct Args {
 }
 
 #[derive(Debug)]
-struct DeltaCandidate {
-    pattern: Pattern,
-    unit: String,
-    delta_sec: u64,
+enum TimeUnit {
+    Second,
+    Minute,
+    Hour,
+    Day,
+    Week,
 }
 
-fn add_best_candidate(
-    n: u64,
-    unit: &str,
-    candidates: &mut Vec<DeltaCandidate>,
-    f: &MultiPatternFinder,
-    delta_mul: u64,
-) {
-    let mut best_pattern = Pattern::default();
-    let mut best_delta = u64::MAX;
-
-    // println!("***********");
-
-    for p in f.find_patterns(n) {
-        let delta = p.value - n;
-
-        // println!("pattern: {p}, delta: {delta}");
-
-        if delta < best_delta {
-            best_delta = delta;
-            best_pattern = p;
+impl TimeUnit {
+    fn to_seconds(&self) -> f64 {
+        match self {
+            TimeUnit::Second => 1.,
+            TimeUnit::Minute => 60.,
+            TimeUnit::Hour => 60. * 60.,
+            TimeUnit::Day => 60. * 60. * 24.,
+            TimeUnit::Week => 60. * 60. * 24. * 7.,
         }
     }
+}
 
-    candidates.push(DeltaCandidate {
-        pattern: best_pattern,
-        unit: unit.to_string(),
-        delta_sec: best_delta * delta_mul,
-    });
+#[derive(Debug)]
+struct UnitDuration<T> {
+    unit: TimeUnit,
+    value: T,
+}
+
+// TODO: fix below
+#[derive(Debug)]
+struct DeltaCandidate {
+    pattern: Pattern,
+    value: UnitDuration,
 }
 
 fn get_duration_str(d: &Duration) -> String {
