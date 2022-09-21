@@ -2,6 +2,8 @@ use std::fmt::Display;
 
 use chrono::{naive::NaiveDate, Duration};
 use clap::Parser;
+use strum::IntoEnumIterator;
+use strum_macros::EnumIter;
 
 fn digit_count(n: u64, base: u8) -> u32 {
     (n as f64 + 1.).log(base as f64).ceil() as u32
@@ -167,11 +169,11 @@ fn _test_pattern_finders() {
     let f = MultiPatternFinder::new();
 
     let nums = vec![9, 99, 100, 4321, 123456];
-    let bases = vec![10, 0x10];
+    let bases = vec![10_u8, 0x10_u8];
 
     for n in nums {
-        for b in bases {
-            for p in f.find_patterns(n, b) {
+        for b in &bases {
+            for p in f.find_patterns(n, *b) {
                 println!("{n} -> {}", p);
             }
         }
@@ -186,7 +188,7 @@ struct Args {
     date: String,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Copy, Clone, EnumIter)]
 enum TimeUnit {
     Second,
     Minute,
@@ -207,17 +209,41 @@ impl TimeUnit {
     }
 }
 
-#[derive(Debug)]
-struct UnitDuration<T> {
-    unit: TimeUnit,
-    value: T,
+impl Display for TimeUnit {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            TimeUnit::Second => write!(f, "second"),
+            TimeUnit::Minute => write!(f, "minute"),
+            TimeUnit::Hour => write!(f, "hour"),
+            TimeUnit::Day => write!(f, "day"),
+            TimeUnit::Week => write!(f, "week"),
+        }
+    }
 }
 
 // TODO: fix below
 #[derive(Debug)]
 struct DeltaCandidate {
     pattern: Pattern,
-    value: UnitDuration,
+    unit: TimeUnit,
+}
+
+impl DeltaCandidate {
+    fn to_seconds(&self) -> u64 {
+        return self.pattern.value * (self.unit.to_seconds() as u64);
+    }
+}
+
+impl Display for DeltaCandidate {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{} {}{}",
+            self.pattern,
+            self.unit,
+            if self.pattern.value > 1 { "s" } else { "" }
+        )
+    }
 }
 
 fn get_duration_str(d: &Duration) -> String {
@@ -257,38 +283,31 @@ fn main() {
     let mut res: Vec<DeltaCandidate> = Vec::new();
     let f = MultiPatternFinder::new();
 
+    let bases = vec![10, 0x10];
     let seconds = delta.num_seconds().abs() as u64;
-    add_best_candidate(seconds, "seconds", &mut res, &f, 1);
 
-    let minutes = delta.num_minutes().abs() as u64;
-    add_best_candidate(minutes, "minutes", &mut res, &f, 60);
+    for time_unit in TimeUnit::iter() {
+        for base in &bases {
+            let n = (seconds as f64 / time_unit.to_seconds()).ceil() as u64;
+            res.push(DeltaCandidate {
+                pattern: f.find_next(n, *base),
+                unit: time_unit,
+            });
+        }
+    }
 
-    let hours = delta.num_hours().abs() as u64;
-    add_best_candidate(hours, "hours", &mut res, &f, 60 * 60);
+    res.sort_by(|l, r| l.to_seconds().cmp(&r.to_seconds()));
 
-    let days = delta.num_days().abs() as u64;
-    add_best_candidate(days, "days", &mut res, &f, 60 * 60 * 24);
-
-    let weeks = delta.num_weeks().abs() as u64;
-    add_best_candidate(weeks, "weeks", &mut res, &f, 60 * 60 * 24 * 7);
-
-    res.sort_by(|l, r| l.delta_sec.cmp(&r.delta_sec));
+    // TODO: fix
 
     let best = res.first().unwrap();
-    let best_duration = Duration::seconds(best.delta_sec as i64);
+    let best_duration = Duration::seconds(best.to_seconds() as i64);
     let best_duration_str = get_duration_str(&best_duration);
     let best_date = cur_date + best_duration;
 
-    let pattern_str = if best.pattern.base == 10 {
-        format!("{}", best.pattern.value)
-    } else {
-        format!("{:#0x}", best.pattern.value)
-    };
-
     println!(
-        "It'll be {} {} on {} (in {})",
-        pattern_str,
-        best.unit,
+        "It'll be {} on {} (in {})",
+        best,
         best_date.format("%Y-%m-%d"),
         best_duration_str
     );
