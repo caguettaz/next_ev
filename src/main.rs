@@ -42,7 +42,7 @@ impl PatternFinder for RoundNumberFinder {
 
         // n - 1, so that powers of base are handled OK
         let digits = digit_count(n - 1, base);
-        let first_digit = first_digit(n, base);
+        let first_digit = first_digit(n - 1, base);
 
         if digits > MAX_EXPONENT || digits < 2 {
             Pattern { value: 0, base }
@@ -168,7 +168,7 @@ impl PatternFinder for MultiPatternFinder {
 fn _test_pattern_finders() {
     let f = MultiPatternFinder::new();
 
-    let nums = vec![9, 99, 100, 4321, 123456];
+    let nums = vec![9, 99, 100, 1000, 2000, 4321, 123456];
     let bases = vec![10_u8, 0x10_u8];
 
     for n in nums {
@@ -264,7 +264,7 @@ fn get_duration_str(d: &Duration) -> String {
 }
 
 fn main() {
-    //_test_pattern_finders();
+    // _test_pattern_finders();
 
     let args = Args::parse();
 
@@ -298,17 +298,16 @@ fn main() {
 
     res.sort_by(|l, r| l.to_seconds().cmp(&r.to_seconds()));
 
-    // TODO: fix
-
     let best = res.first().unwrap();
     let best_duration = Duration::seconds(best.to_seconds() as i64);
-    let best_duration_str = get_duration_str(&best_duration);
-    let best_date = cur_date + best_duration;
+    let best_date = naive_date + best_duration;
+
+    let best_wait_str = get_duration_str(&(best_date - cur_date));
 
     println!(
         "It'll be {} on {} (in {})",
         best,
         best_date.format("%Y-%m-%d"),
-        best_duration_str
+        best_wait_str
     );
 }
