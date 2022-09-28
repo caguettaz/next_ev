@@ -10,7 +10,8 @@ fn digit_count(n: u64, base: u8) -> u32 {
 }
 
 fn first_digit(n: u64, base: u8) -> u8 {
-    (n / (10_u64).pow(digit_count(n, base) - 1)) as u8
+    (n / (base as u64).pow(digit_count(n, base) - 1)) as u8
+}
 }
 
 #[derive(Default, Debug)]
