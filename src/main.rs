@@ -1,6 +1,6 @@
 use std::fmt::Display;
 
-use chrono::{naive::NaiveDate, Duration};
+use chrono::{naive::NaiveDate, Datelike, Duration};
 use clap::Parser;
 use strum::IntoEnumIterator;
 use strum_macros::EnumIter;
@@ -12,6 +12,17 @@ fn digit_count(n: u64, base: u8) -> u32 {
 fn first_digit(n: u64, base: u8) -> u8 {
     (n / (base as u64).pow(digit_count(n, base) - 1)) as u8
 }
+
+fn add_months_to_date(date: &NaiveDate, mut months: u64) -> NaiveDate {
+    let mut year = date.year();
+    let mut month = date.month();
+
+    months += month as u64 - 1;
+
+    year += months as i32 / 12;
+    month = (months as u32 % 12) + 1;
+
+    NaiveDate::from_ymd(year, month, date.day())
 }
 
 #[derive(Default, Debug)]
@@ -196,16 +207,18 @@ enum TimeUnit {
     Hour,
     Day,
     Week,
+    Month,
 }
 
 impl TimeUnit {
-    fn to_seconds(&self) -> f64 {
+    fn to_seconds(&self) -> Option<f64> {
         match self {
-            TimeUnit::Second => 1.,
-            TimeUnit::Minute => 60.,
-            TimeUnit::Hour => 60. * 60.,
-            TimeUnit::Day => 60. * 60. * 24.,
-            TimeUnit::Week => 60. * 60. * 24. * 7.,
+            TimeUnit::Second => Some(1.),
+            TimeUnit::Minute => Some(60.),
+            TimeUnit::Hour => Some(60. * 60.),
+            TimeUnit::Day => Some(60. * 60. * 24.),
+            TimeUnit::Week => Some(60. * 60. * 24. * 7.),
+            TimeUnit::Month => None,
         }
     }
 }
@@ -218,6 +231,7 @@ impl Display for TimeUnit {
             TimeUnit::Hour => write!(f, "hour"),
             TimeUnit::Day => write!(f, "day"),
             TimeUnit::Week => write!(f, "week"),
+            TimeUnit::Month => write!(f, "month"),
         }
     }
 }
@@ -230,8 +244,22 @@ struct DeltaCandidate {
 }
 
 impl DeltaCandidate {
-    fn to_seconds(&self) -> u64 {
-        return self.pattern.value * (self.unit.to_seconds() as u64);
+    fn to_seconds(&self) -> Option<u64> {
+        match self.unit.to_seconds() {
+            Some(s) => Some(self.pattern.value * (s as u64)),
+            None => None,
+        }
+    }
+
+    fn add_to_date(&self, date: &NaiveDate) -> NaiveDate {
+        if let Some(s) = self.to_seconds() {
+            return *date + Duration::seconds(s as i64);
+        }
+
+        match self.unit {
+            TimeUnit::Month => return add_months_to_date(date, self.pattern.value),
+            _ => return NaiveDate::default(),
+        }
     }
 }
 
@@ -289,19 +317,35 @@ fn main() {
 
     for time_unit in TimeUnit::iter() {
         for base in &bases {
-            let n = (seconds as f64 / time_unit.to_seconds()).ceil() as u64;
-            res.push(DeltaCandidate {
-                pattern: f.find_next(n, *base),
-                unit: time_unit,
-            });
+            if let Some(s) = time_unit.to_seconds() {
+                let n = (seconds as f64 / s).ceil() as u64;
+                res.push(DeltaCandidate {
+                    pattern: f.find_next(n, *base),
+                    unit: time_unit,
+                });
+            }
         }
     }
 
-    res.sort_by(|l, r| l.to_seconds().cmp(&r.to_seconds()));
+    let mut months = (cur_date.year() as u64 - naive_date.year() as u64) * 12
+        + cur_date.month() as u64
+        - naive_date.month() as u64;
+
+    if cur_date.day() > naive_date.day() {
+        months += 1;
+    }
+
+    for base in &bases {
+        res.push(DeltaCandidate {
+            pattern: f.find_next(months, *base),
+            unit: TimeUnit::Month,
+        });
+    }
+
+    res.sort_by(|l, r| l.add_to_date(&naive_date).cmp(&r.add_to_date(&naive_date)));
 
     let best = res.first().unwrap();
-    let best_duration = Duration::seconds(best.to_seconds() as i64);
-    let best_date = naive_date + best_duration;
+    let best_date = best.add_to_date(&naive_date);
 
     let best_wait_str = get_duration_str(&(best_date - cur_date));
 
